@@ -7,20 +7,19 @@ IN: concurrency.combinators
 
 <PRIVATE
 
-: (parallel-each) ( n quot -- )
+: parallel ( n quot -- )
     [ <count-down> ] dip keep await ; inline
 
 PRIVATE>
 
 : parallel-each ( seq quot: ( elt -- ) -- )
-    over length [
-        '[ _ curry _ spawn-stage ] each
-    ] (parallel-each) ; inline
+    over length [ '[ _ curry _ spawn-stage ] each ] parallel ; inline
+
+: parallel-each-index ( seq quot: ( elt index -- ) -- )
+    over length [ '[ _ 2curry _ spawn-stage ] each-index ] parallel ; inline
 
 : 2parallel-each ( seq1 seq2 quot: ( elt1 elt2 -- ) -- )
-    2over min-length [
-        '[ _ 2curry _ spawn-stage ] 2each
-    ] (parallel-each) ; inline
+    2over min-length [ '[ _ 2curry _ spawn-stage ] 2each ] parallel ; inline
 
 : parallel-product-each ( seq quot: ( elt -- ) -- )
     [ <product-sequence> ] dip parallel-each ;
@@ -31,34 +30,23 @@ PRIVATE>
 : parallel-filter ( seq quot: ( elt -- ? ) -- newseq )
     over [ selector [ parallel-each ] dip ] dip like ; inline
 
-<PRIVATE
-
-: [future] ( quot -- quot' ) '[ _ curry future ] ; inline
-
-: future-values ( futures -- futures )
-    [ ?future ] map! ; inline
-
-: future-values-timeout ( futures timeout -- futures )
-    '[ _ ?future-timeout ] map! ; inline
-
-PRIVATE>
+: parallel-map-as ( seq quot: ( elt -- newelt ) exemplar -- newseq )
+    [
+        over [ length ] keep new-sequence
+        [ '[ _ dip _ set-nth ] parallel-each-index ] keep
+    ] dip like ; inline
 
 : parallel-map ( seq quot: ( elt -- newelt ) -- newseq )
-    [future] map future-values ; inline
-
-: parallel-map-timeout (  seq  quot: ( elt -- newelt ) timeout -- newseq )
-    [ [future] map ] dip future-values-timeout ; inline
+    over parallel-map-as ; inline
 
 : parallel-assoc-map-as ( assoc quot: ( key value -- newkey newvalue ) exemplar -- newassoc )
-    [
-        [ 2array ] compose '[ _ 2curry future ] { } assoc>map future-values
-    ] dip assoc-like ;
+    [ >alist ] [ '[ first2 @ 2array ] parallel-map ] [ assoc-like ] tri* ; inline
 
 : parallel-assoc-map ( assoc quot: ( key value -- newkey newvalue ) -- newassoc )
     over parallel-assoc-map-as ;
 
 : 2parallel-map ( seq1 seq2 quot: ( elt1 elt2 -- newelt ) -- newseq )
-    '[ _ 2curry future ] 2map future-values ;
+    '[ _ 2curry future ] 2map [ ?future ] map ;
 
 : parallel-product-map ( seq quot: ( elt -- newelt ) -- newseq )
     [ <product-sequence> ] dip parallel-map ;
@@ -67,6 +55,8 @@ PRIVATE>
     [ 2array ] dip [ first2-unsafe ] prepose parallel-product-map ;
 
 <PRIVATE
+
+: [future] ( quot -- quot' ) '[ _ curry future ] ; inline
 
 : (parallel-spread) ( n -- spread-array )
     [ ?future ] <repetition> ; inline

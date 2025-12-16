@@ -3,12 +3,12 @@
 USING: alien.data alien.strings combinators.short-circuit
 environment io io.encodings io.encodings.utf16 io.streams.memory
 kernel sequences specialized-arrays system windows windows.errors
-windows.kernel32 windows.types ;
+windows.kernel32 windows.types windows.user32 ;
 SPECIALIZED-ARRAY: TCHAR
 IN: environment.windows
 
 M: windows os-env
-    MAX_UNICODE_PATH TCHAR <c-array>
+    0 SetLastError MAX_UNICODE_PATH TCHAR <c-array>
     [ dup length GetEnvironmentVariable ] keep
     { [ over 0 = ] [ GetLastError ERROR_ENVVAR_NOT_FOUND = ] } 0&&
     [ 2drop f ] [ nip alien>native-string ] if ;

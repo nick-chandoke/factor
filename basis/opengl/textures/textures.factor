@@ -9,6 +9,10 @@ FROM: alien.c-types => int float ;
 SPECIALIZED-ARRAY: float
 IN: opengl.textures
 
+! GL3 texture hooks - set by ui.render or similar
+SYMBOL: make-texture-hook
+SYMBOL: draw-texture-hook
+
 SYMBOL: non-power-of-2-textures?
 
 : check-extensions ( -- )
@@ -263,7 +267,10 @@ M: float-11-11-10-components (component-type>type)
 
 SLOT: display-list
 
-: draw-texture ( texture -- ) display-list>> [ glCallList ] when* ;
+: draw-texture ( texture -- )
+    draw-texture-hook get-global
+    [ call( texture -- ) ]
+    [ display-list>> [ glCallList ] when* ] if* ;
 
 GENERIC: draw-scaled-texture ( dim texture -- )
 
@@ -275,9 +282,11 @@ DEFER: make-texture
 : image-format ( image -- internal-format format type )
     [ component-order>> ] [ component-type>> ] bi (image-format) ;
 
-<PRIVATE
-
+! Texture types - exported for GL3 backend support
 TUPLE: single-texture < disposable image dim loc texture-coords texture display-list ;
+TUPLE: multi-texture < disposable grid display-list loc ;
+
+<PRIVATE
 
 : adjust-texture-dim ( dim -- dim' )
     non-power-of-2-textures? get [
@@ -358,9 +367,13 @@ TUPLE: single-texture < disposable image dim loc texture-coords texture display-
         swap >>loc
         swap [ >>image ] [ dim>> >>dim ] bi
     dup image>> dim>> product 0 = [
-        dup texture-coords >>texture-coords
-        dup image>> make-texture >>texture
-        dup make-texture-display-list >>display-list
+        make-texture-hook get-global [
+            [ dup image>> ] dip call( image -- id ) >>texture
+        ] [
+            dup texture-coords >>texture-coords
+            dup image>> make-texture >>texture
+            dup make-texture-display-list >>display-list
+        ] if*
     ] unless ;
 
 M: single-texture dispose*
@@ -369,13 +382,13 @@ M: single-texture dispose*
 
 M: single-texture draw-scaled-texture
     2dup dim>> = [ nip draw-texture ] [
-        dup texture>> [ draw-textured-rect ] [ 2drop ] if
+        draw-texture-hook get-global
+        [ [ nip ] dip call( texture -- ) ]
+        [ dup texture>> [ draw-textured-rect ] [ 2drop ] if ] if*
     ] if ;
 
-TUPLE: multi-texture < disposable grid display-list loc ;
-
 : image-dim ( image -- dim )
-    dim>> gl-scale-factor get-global [ '[ _ /i ] map ] when* ;
+    dim>> gl-scale-factor get-global [ '[ _ / ] map ] when* ;
 
 : image-locs ( image-grid -- loc-grid )
     [ first [ image-dim first ] map ]
@@ -403,7 +416,11 @@ TUPLE: multi-texture < disposable grid display-list loc ;
     [
         [ multi-texture new-disposable ] 2dip
         [ nip >>loc ] [ <texture-grid> >>grid ] 2bi
-        dup grid>> make-textured-grid-display-list >>display-list
+        make-texture-hook get-global [
+            drop ! Skip display list creation in GL3 mode
+        ] [
+            dup grid>> make-textured-grid-display-list >>display-list
+        ] if*
     ] with-destructors ;
 
 : normalize-by-first-texture-max-dim ( multi-texture -- norms )

@@ -7,7 +7,7 @@ ERROR: unknown-gl-platform ;
 << {
     { [ os windows? ] [ "opengl.gl.windows" ] }
     { [ os macos? ]  [ "opengl.gl.macos" ] }
-    { [ os unix? ] [ "opengl.gl.gtk" ] }
+    { [ os unix? ] [ "opengl.gl.gtk3" ] }
     [ unknown-gl-platform ]
 } cond use-vocab >>
 
@@ -31,7 +31,7 @@ reset-gl-function-number-counter
     gl-function-context 2array dup +gl-function-pointers+ get-global at
     [ 2nip ] [
         [
-            [ gl-function-address ] map [ ] find nip
+            [ gl-function-address ] map-find drop
             dup [ "OpenGL function not available" throw ] unless
             dup
         ] dip

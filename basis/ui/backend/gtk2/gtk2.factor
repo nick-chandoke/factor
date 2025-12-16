@@ -1,16 +1,16 @@
 ! Copyright (C) 2010, 2011 Anton Gorenko, Philipp Bruschweiler.
 ! See https://factorcode.org/license.txt for BSD license.
 USING: accessors alien.accessors alien.c-types alien.strings
-arrays assocs classes.struct combinators continuations
-destructors environment gdk2.ffi gdk2.gl.ffi gdk2.pixbuf.ffi
-glib.ffi gobject.ffi gtk2.ffi gtk2.gl.ffi io.encodings.binary
-io.encodings.utf8 io.files io.pathnames kernel libc literals
-locals math math.order math.bitwise math.functions math.parser
-math.vectors namespaces opengl sequences strings system threads
-ui ui.backend ui.backend.gtk2.input-methods ui.backend.gtk2.io
-ui.backend.x11.keys ui.clipboards ui.event-loop ui.gadgets
-ui.gadgets.private ui.gadgets.worlds ui.gestures
-ui.pixel-formats ui.private vocabs.loader ;
+arrays assocs cairo.ffi classes.struct combinators continuations
+destructors environment gdk2.ffi gdk2.gl.ffi gdk-pixbuf.ffi
+glib.backend glib.ffi gobject gobject.ffi gtk2.ffi gtk2.gl.ffi
+io.encodings.binary io.encodings.utf8 io.files io.pathnames
+kernel libc literals locals math math.order math.bitwise
+math.functions math.parser math.vectors namespaces opengl
+sequences strings system threads ui ui.backend
+ui.backend.gtk2.input-methods ui.backend.x11.keys ui.clipboards
+ui.event-loop ui.gadgets ui.gadgets.private ui.gadgets.worlds
+ui.gestures ui.pixel-formats ui.private vocabs.loader ;
 IN: ui.backend.gtk2
 
 SINGLETON: gtk2-ui-backend
@@ -19,12 +19,6 @@ TUPLE: window-handle window drawable im-context fullscreen? ;
 
 : <window-handle> ( window drawable im-context -- window-handle )
     f window-handle boa ;
-
-: connect-signal-with-data ( object signal-name callback data -- )
-    [ utf8 string>alien ] 2dip g_signal_connect drop ;
-
-: connect-signal ( object signal-name callback -- )
-    f connect-signal-with-data ;
 
 ! Clipboards
 
@@ -65,35 +59,6 @@ M: gtk2-clipboard set-clipboard-contents
     detect-scale-factor
     [ 1.0 > ] keep f ? gl-scale-factor set-global ;
 
-! Timer
-
-: set-timeout*-value ( alien value -- )
-    swap 0 set-alien-signed-4 ; inline
-
-: timer-prepare ( source timeout* -- ? )
-    nip sleep-time 1,000,000,000 or
-    [ 1,000,000 /i set-timeout*-value ] keep 0 = ;
-
-: timer-check ( source -- ? )
-    drop sleep-time 0 = ;
-
-: timer-dispatch ( source callback user_data -- ? )
-    3drop yield t ;
-
-: <timer-funcs> ( -- timer-funcs )
-    GSourceFuncs malloc-struct
-        [ timer-prepare ] GSourceFuncsPrepareFunc >>prepare
-        [ timer-check ] GSourceFuncsCheckFunc >>check
-        [ timer-dispatch ] GSourceFuncsDispatchFunc >>dispatch ;
-
-:: with-timer ( quot -- )
-    <timer-funcs> &free
-    GSource heap-size g_source_new &g_source_unref :> source
-    source G_PRIORITY_DEFAULT_IDLE g_source_set_priority
-    source f g_source_attach drop
-    [ quot call( -- ) ]
-    [ source g_source_destroy ] finally ;
-
 ! User input
 
 CONSTANT: events-mask
@@ -110,10 +75,10 @@ CONSTANT: events-mask
     }
 
 : event-loc ( event -- loc )
-    [ x>> ] [ y>> ] bi [ gl-unscale >fixnum ] bi@ 2array ;
+    [ x>> ] [ y>> ] bi [ gl-unscale ] bi@ 2array ;
 
 : event-dim ( event -- dim )
-    [ width>> ] [ height>> ] bi [ gl-unscale >fixnum ] bi@ 2array ;
+    [ width>> ] [ height>> ] bi [ gl-unscale ] bi@ 2array ;
 
 : scroll-direction ( event -- pair )
     direction>> {
@@ -183,7 +148,7 @@ CONSTANT: events-mask
 : on-focus-out ( win event user-data -- ? )
     2drop window unfocus-world f ;
 
-CONSTANT: default-icon-path "resource:misc/icons/Factor_128x128.png"
+CONSTANT: default-icon-path "resource:misc/icons/icon_128x128.png"
 
 : default-icon-data ( -- byte-array/f )
     [
@@ -524,7 +489,7 @@ M: gtk2-ui-backend (with-ui)
     init-scale-factor
     start-ui
     [
-        [ [ gtk_main ] with-timer ] with-event-loop
+        [ [ gtk_main ] with-timer ] with-io
     ] with-destructors ;
 
 M: gtk2-ui-backend stop-event-loop

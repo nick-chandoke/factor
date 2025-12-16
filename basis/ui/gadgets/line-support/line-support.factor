@@ -25,8 +25,7 @@ M: line-gadget line-leading*
 GENERIC: line-leading ( gadget -- n )
 
 M: line-gadget line-leading
-    [ line-leading>> ]
-    [
+    [ line-leading>> ] [
         [ line-leading* ] [ ] [ layout-state>> ] tri
         [ drop ] [ dupd line-leading<< ] if
     ] ?unless ;
@@ -34,20 +33,19 @@ M: line-gadget line-leading
 GENERIC: line-height* ( gadget -- n )
 
 M: line-gadget line-height*
-    font>> font-metrics height>> gl-ceiling >integer ;
+    font>> font-metrics height>> gl-ceiling ;
 
 GENERIC: line-height ( gadget -- n )
 
 M: line-gadget line-height
-    [ line-height>> ]
-    [
+    [ line-height>> ] [
         [ line-height* ] [ ] [ layout-state>> ] tri
         [ drop ] [ dupd line-height<< ] if
     ] ?unless ;
 
 : y>line ( y gadget -- n ) line-height /i ;
 
-: line>y ( n gadget -- y ) line-height * >integer ;
+: line>y ( n gadget -- y ) line-height * gl-round ;
 
 : validate-line ( m gadget -- n )
     control-value [ drop f ] [ length 1 - min 0 max ] if-empty ;
@@ -80,8 +78,8 @@ GENERIC: draw-line ( line index gadget -- )
         [ line-height ]
         [ ]
     } cleave '[
-        0 over _ * >integer 2array
-        [ _ draw-line ] with-translation
+        0 over _ * gl-round 2array -rot
+        [ _ draw-line ] 2curry with-translation
     ] each-slice-index ;
 
 <PRIVATE
@@ -107,8 +105,7 @@ PRIVATE>
     [ pref-dim ] [ line-gadget-dim ] bi ;
 
 M: line-gadget pref-viewport-dim
-    [ pref-viewport-dim>> ]
-    [
+    [ pref-viewport-dim>> ] [
         [ pref-viewport-dim* ] [ ] [ layout-state>> ] tri
         [ drop ] [ dupd pref-viewport-dim<< ] if
     ] ?unless ;

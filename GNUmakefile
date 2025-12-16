@@ -2,7 +2,7 @@
 BUILD_DIR ?= build
 
 ifdef CONFIG
-	VERSION := 0.101
+	VERSION := 0.102
 	GIT_LABEL := $(shell echo $(shell git describe --all)-$(shell git rev-parse HEAD))
 	BUNDLE := Factor.app
 	DEBUG ?= 0
@@ -43,7 +43,7 @@ ifdef CONFIG
 	ASFLAGS += $(COMMON_FLAGS)
 	CFLAGS += $(SITE_CFLAGS) $(COMMON_FLAGS)
 	# Use C++20 standard
-	CXX_STD := c++20
+	CXX_STD := c++17
 	CXXFLAGS += -std=$(CXX_STD) $(SITE_CXXFLAGS) $(COMMON_FLAGS) $(ARCHITECTURE_FLAG)
 	LINKER_FLAGS += $(SITE_COMMON_LINKER_FLAGS) $(CC_OPT) $(LDFLAGS)
 
