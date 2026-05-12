@@ -69,21 +69,32 @@ CONSTANT: events-mask
         GDK_KEY_PRESS_MASK
         GDK_KEY_RELEASE_MASK
         GDK_FOCUS_CHANGE_MASK
+        GDK_SCROLL_MASK
+        GDK_SMOOTH_SCROLL_MASK
     }
 
+! hack for some window managers that have scale-factor set to
+! 1x but the window still reports logical dimensions scaled
+! vs. device pixel dimensions
+SYMBOL: event-scale-factor
+
+: event-scale ( w h -- w' h' )
+    event-scale-factor get-global [ '[ _ / ] bi@ ] when* ;
+
 : event-loc ( event -- loc )
-    [ x>> ] [ y>> ] bi 2array ;
+    [ x>> ] [ y>> ] bi event-scale 2array ;
 
 : event-dim ( event -- dim )
-    [ width>> ] [ height>> ] bi 2array ;
+    [ width>> ] [ height>> ] bi event-scale 2array ;
 
 : scroll-direction ( event -- pair )
-    direction>> {
+    dup direction>> {
         { $ GDK_SCROLL_UP { 0 -1 } }
         { $ GDK_SCROLL_DOWN { 0 1 } }
         { $ GDK_SCROLL_LEFT { -1 0 } }
         { $ GDK_SCROLL_RIGHT { 1 0 } }
-    } at ;
+        { $ GDK_SCROLL_SMOOTH f }
+    } at [ nip ] [ [ delta_x>> ] [ delta_y>> ] bi 2array ] if* ;
 
 : on-motion ( drawable event user-data -- ? )
     drop swap
@@ -192,12 +203,14 @@ icon-data [ default-icon-data ] initialize
 
 ! Render callback for GtkGLArea
 
+: calc-event-scale-factor ( glarea world -- )
+    event-scale-factor get-global [
+        dim>> first [ gtk_widget_get_allocated_width ] dip /
+        event-scale-factor set-global
+    ] [ 2drop ] if ;
+
 : on-render ( glarea context user-data -- ? )
-    2drop gtk_widget_get_toplevel window
-    dup draw-world? [
-        draw-world
-    ] [ drop ] if
-    f ;
+    2drop dup gtk_widget_get_toplevel window calc-event-scale-factor f ;
 
 : connect-render-signal ( drawable -- )
     "render" [ on-render yield ]
@@ -205,9 +218,7 @@ icon-data [ default-icon-data ] initialize
 
 : on-resize ( glarea width height user-data -- )
     drop [ gl-unscale ] bi@ 2array swap gtk_widget_get_toplevel window
-    dup active?>> [
-        swap >>dim relayout
-    ] [ 2drop ] if ;
+    dup active?>> [ swap >>dim relayout ] [ 2drop ] if ;
 
 : connect-resize-signal ( drawable -- )
     "resize" [ on-resize yield ]
@@ -353,30 +364,6 @@ CONSTANT: window-controls>func-flags
 M: gtk3-ui-backend (make-pixel-format) 2drop f ;
 
 M: gtk3-ui-backend (free-pixel-format) drop ;
-
-: gl3-full-draw-init ( world -- )
-    ! Set up clip and viewport (GL3 version - no glOrtho)
-    dup gl3-init-clip
-    ! Set up GL state and projection in logical pixels
-    ! (viewport handles device pixel scaling)
-    [ dim>> ] [ background-color>> ] bi gl3-draw-init ;
-
-: setup-gl3-hooks ( -- )
-    [ gl3-init ] gl-init-hook set-global
-    [ gl3-full-draw-init ] gl-draw-init-hook set-global
-    [ gl3-color ] gl-color-hook set-global
-    [ gl3-fill-rect* ] gl-fill-rect-hook set-global
-    [ gl3-rect* ] gl-rect-hook set-global
-    [ gl3-line* ] gl-line-hook set-global
-    [ first2 gl3-translate ] gl-translate-hook set-global
-    [ with-gl3-translation ] with-translation-hook set-global
-    [ gl3-scale ] gl-scale-2d-hook set-global
-    [ gl3-rectf ] gl-rectf-hook set-global
-    [ with-gl3-matrix ] with-matrix-hook set-global
-    [ gl3-draw-lines* ] gl-draw-lines-hook set-global
-    [ make-texture-gl3 ] make-texture-hook set-global
-    [ draw-texture-gl3 ] draw-texture-hook set-global
-    t gl3-mode? set-global ;
 
 M: window-handle select-gl-context
     drawable>>

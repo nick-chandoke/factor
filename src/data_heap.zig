@@ -1,0 +1,441 @@
+const std = @import("std");
+const layouts = @import("layouts.zig");
+const vm = @import("vm.zig");
+const bump_allocator = @import("bump_allocator.zig");
+const free_list = @import("free_list.zig");
+const mark_bits = @import("mark_bits.zig");
+const object_start_map = @import("object_start_map.zig");
+const segments = @import("segments.zig");
+const Cell = layouts.Cell;
+
+pub const Generation = enum(u2) {
+    nursery = 0,
+    aging = 1,
+    tenured = 2,
+};
+
+pub const AgingSpace = struct {
+    start: Cell,
+    end: Cell,
+    size: Cell,
+    here: Cell,
+    object_start: object_start_map.ObjectStartMap,
+
+    const Self = @This();
+
+    pub fn init(allocator: std.mem.Allocator, start: Cell, size: Cell) !Self {
+        const aligned_start = layouts.alignCell(start, layouts.data_alignment);
+        const effective_size = (start + size) - aligned_start;
+        return Self{
+            .start = aligned_start,
+            .end = start + size,
+            .size = size,
+            .here = aligned_start,
+            .object_start = try object_start_map.ObjectStartMap.init(allocator, aligned_start, effective_size),
+        };
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.object_start.deinit();
+    }
+
+    pub fn reset(self: *Self) void {
+        self.here = self.start;
+        self.object_start.clear();
+    }
+
+    pub fn allocate(self: *Self, size: Cell) ?Cell {
+        const aligned_here = layouts.alignCell(self.here, layouts.data_alignment);
+        const aligned_size = layouts.alignCell(size, layouts.data_alignment);
+        if (aligned_here + aligned_size > self.end) {
+            return null;
+        }
+        self.here = aligned_here + aligned_size;
+        std.debug.assert(aligned_here % layouts.data_alignment == 0);
+        std.debug.assert(self.here <= self.end);
+        self.object_start.recordObjectStart(aligned_here);
+        return aligned_here;
+    }
+
+    pub fn usedBytes(self: *const Self) Cell {
+        return self.here - self.start;
+    }
+
+    pub fn freeBytes(self: *const Self) Cell {
+        return self.end - self.here;
+    }
+
+    pub fn contains(self: *const Self, addr: Cell) bool {
+        return addr >= self.start and addr < self.end;
+    }
+};
+
+pub const TenuredSpace = struct {
+    start: Cell,
+    end: Cell,
+    marks: mark_bits.MarkBits,
+    size: Cell,
+    free_list: *free_list.FreeListAllocator,
+    object_start: object_start_map.ObjectStartMap,
+    allocator: std.mem.Allocator,
+
+    const Self = @This();
+
+    pub fn init(allocator: std.mem.Allocator, start: Cell, size: Cell) !Self {
+        const fl = try allocator.create(free_list.FreeListAllocator);
+        fl.* = free_list.FreeListAllocator.init(allocator, start, size);
+        return Self{
+            .start = start,
+            .end = start + size,
+            .marks = try mark_bits.MarkBits.init(allocator, start, size),
+            .size = size,
+            .free_list = fl,
+            .object_start = try object_start_map.ObjectStartMap.init(allocator, start, size),
+            .allocator = allocator,
+        };
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.free_list.deinit();
+        self.allocator.destroy(self.free_list);
+        self.marks.deinit();
+        self.object_start.deinit();
+    }
+
+    pub fn allocate(self: *Self, size: Cell) ?Cell {
+        const addr = self.free_list.allocate(size);
+        if (addr) |a| {
+            self.object_start.recordAllocation(a);
+        }
+        return addr;
+    }
+
+    pub fn contains(self: *const Self, addr: Cell) bool {
+        return addr >= self.start and addr < self.end;
+    }
+
+    pub fn usedBytes(self: *const Self) Cell {
+        return self.free_list.allocatedBytes();
+    }
+
+    pub fn freeBytes(self: *const Self) Cell {
+        return self.free_list.freeBytes();
+    }
+
+    pub fn isMarked(self: *const Self, addr: Cell) bool {
+        return self.marks.isMarked(addr);
+    }
+
+    pub fn clearMarks(self: *Self) void {
+        self.marks.clearMarks();
+    }
+};
+
+pub const DataHeap = struct {
+    segment: segments.Segment,
+
+    nursery: bump_allocator.BumpAllocator,
+    aging: AgingSpace,
+    aging_semispace: AgingSpace,
+    tenured: TenuredSpace,
+
+    cards: object_start_map.CardTable,
+    decks: object_start_map.DeckTable,
+
+    young_size: Cell,
+    aging_size: Cell,
+    tenured_size: Cell,
+
+    nursery_collections: Cell,
+    aging_collections: Cell,
+    full_collections: Cell,
+
+    allocator: std.mem.Allocator,
+
+    const Self = @This();
+
+    pub const default_young_size: Cell = 4 * 1024 * 1024; // 4MB
+    pub const default_aging_size: Cell = 16 * 1024 * 1024; // 16MB
+    pub const default_tenured_size: Cell = 128 * 1024 * 1024; // 128MB
+
+    pub fn init(
+        allocator: std.mem.Allocator,
+        young_size: Cell,
+        aging_size: Cell,
+        tenured_size: Cell,
+    ) !*Self {
+        const self = try allocator.create(Self);
+        errdefer allocator.destroy(self);
+
+        const heap_align = @as(Cell, vm.deck_size);
+        const tenured_sz = (tenured_size + heap_align - 1) & ~(heap_align - 1);
+        const aging_sz = (aging_size + heap_align - 1) & ~(heap_align - 1);
+        const young_sz = (young_size + heap_align - 1) & ~(heap_align - 1);
+
+        const total_size = young_sz + aging_sz * 2 + tenured_sz + vm.deck_size;
+
+        // Allocate the segment
+        self.segment = try segments.Segment.init(total_size, false);
+        errdefer self.segment.deinit();
+
+        const aligned_heap_start = layouts.alignCell(self.segment.start, vm.deck_size);
+        const aligned_offset = aligned_heap_start - self.segment.start;
+        std.debug.assert(aligned_offset <= self.segment.size);
+        self.segment.size -= aligned_offset;
+        self.segment.start = aligned_heap_start;
+        self.segment.end = aligned_heap_start + self.segment.size;
+
+        const tenured_start = self.segment.start;
+        const aging_start = tenured_start + tenured_sz;
+        const aging_semi_start = aging_start + aging_sz;
+        const nursery_start = aging_semi_start + aging_sz;
+
+        self.tenured = try TenuredSpace.init(allocator, tenured_start, tenured_sz);
+        errdefer self.tenured.deinit();
+
+        self.aging = try AgingSpace.init(allocator, aging_start, aging_sz);
+        errdefer self.aging.deinit();
+        self.aging_semispace = try AgingSpace.init(allocator, aging_semi_start, aging_sz);
+        errdefer self.aging_semispace.deinit();
+        self.nursery = bump_allocator.BumpAllocator{
+            .start = nursery_start,
+            .here = nursery_start,
+            .end = nursery_start + young_sz,
+            .size = young_sz,
+        };
+
+        self.cards = try object_start_map.CardTable.init(allocator, self.segment.start, self.segment.size);
+        errdefer self.cards.deinit();
+
+        self.decks = try object_start_map.DeckTable.init(allocator, self.segment.start, self.segment.size);
+        errdefer self.decks.deinit();
+
+        self.young_size = young_sz;
+        self.aging_size = aging_sz;
+        self.tenured_size = tenured_sz;
+        self.nursery_collections = 0;
+        self.aging_collections = 0;
+        self.full_collections = 0;
+        self.allocator = allocator;
+
+        return self;
+    }
+
+    pub fn deinit(self: *Self) void {
+        self.tenured.deinit();
+        self.aging.deinit();
+        self.aging_semispace.deinit();
+        self.cards.deinit();
+        self.decks.deinit();
+        self.segment.deinit();
+        self.allocator.destroy(self);
+    }
+
+    pub fn allocateNursery(self: *Self, size: Cell) ?Cell {
+        if (!self.nursery.canAllot(size)) return null;
+        return self.nursery.allocate(size);
+    }
+
+    pub fn allocateAging(self: *Self, size: Cell) ?Cell {
+        return self.aging.allocate(size);
+    }
+
+    pub fn allocateTenured(self: *Self, size: Cell) ?Cell {
+        return self.tenured.allocate(size);
+    }
+
+    pub fn addressGeneration(self: *const Self, addr: Cell) ?Generation {
+        if (addr >= self.nursery.start and addr < self.nursery.end) {
+            return .nursery;
+        }
+        if (addr >= self.aging.start and addr < self.aging.end) {
+            return .aging;
+        }
+        if (addr >= self.aging_semispace.start and addr < self.aging_semispace.end) {
+            return .aging;
+        }
+        if (addr >= self.tenured.start and addr < self.tenured.end) {
+            return .tenured;
+        }
+        return null;
+    }
+
+    pub fn inYoungGeneration(self: *const Self, addr: Cell) bool {
+        if (self.addressGeneration(addr)) |gen| {
+            return gen == .nursery or gen == .aging;
+        }
+        return false;
+    }
+
+    pub fn contains(self: *const Self, addr: Cell) bool {
+        return addr >= self.segment.start and addr < self.segment.end;
+    }
+
+    pub fn resetNursery(self: *Self) void {
+        self.nursery.reset();
+    }
+
+    pub fn swapAgingSpaces(self: *Self) void {
+        const tmp = self.aging;
+        self.aging = self.aging_semispace;
+        self.aging_semispace = tmp;
+        self.aging_semispace.reset(); // Also clears object_start map
+    }
+
+    pub fn totalUsedBytes(self: *const Self) Cell {
+        return self.nursery.usedBytes() + self.aging.usedBytes() + self.tenured.usedBytes();
+    }
+
+    pub fn usedBytes(self: *const Self) Cell {
+        return self.totalUsedBytes();
+    }
+
+    pub fn totalFreeBytes(self: *const Self) Cell {
+        return self.nursery.freeBytes() + self.aging.freeBytes() + self.tenured.freeBytes();
+    }
+
+    pub fn totalBytes(self: *const Self) Cell {
+        return self.segment.size;
+    }
+
+    pub fn writeBarrier(self: *Self, slot_addr: Cell) void {
+        if (slot_addr < self.segment.start or slot_addr >= self.segment.end) {
+            return;
+        }
+        self.cards.markCard(slot_addr);
+        self.decks.markDeck(slot_addr);
+    }
+
+    pub fn clearCards(self: *Self, start: Cell, end: Cell) void {
+        if (start >= self.segment.end or end <= self.segment.start) {
+            return;
+        }
+
+        const clamped_start = @max(start, self.segment.start);
+        const clamped_end = @min(end, self.segment.end);
+
+        const start_card = (clamped_start - self.segment.start) / vm.card_size;
+        const end_card = (clamped_end - self.segment.start + vm.card_size - 1) / vm.card_size;
+
+        const card_count = self.cards.cardCount();
+        const safe_end_card = @min(end_card, card_count);
+
+        if (start_card < safe_end_card) {
+            @memset(self.cards.cards[start_card..safe_end_card], 0);
+        }
+    }
+
+    pub fn clearDecks(self: *Self, start: Cell, end: Cell) void {
+        if (start >= self.segment.end or end <= self.segment.start) {
+            return;
+        }
+
+        const clamped_start = @max(start, self.segment.start);
+        const clamped_end = @min(end, self.segment.end);
+
+        const start_deck = (clamped_start - self.segment.start) / vm.deck_size;
+        const end_deck = (clamped_end - self.segment.start + vm.deck_size - 1) / vm.deck_size;
+
+        const deck_count = self.decks.deckCount();
+        const safe_end_deck = @min(end_deck, deck_count);
+
+        if (start_deck < safe_end_deck) {
+            @memset(self.decks.decks[start_deck..safe_end_deck], 0);
+        }
+    }
+
+    // Calculate high water mark - the minimum free space needed in tenured
+    // This is the size of nursery + aging, which is the maximum amount that
+    // could be promoted to tenured in a single collection
+    pub fn highWaterMark(self: *const Self) Cell {
+        return self.young_size + self.aging_size;
+    }
+
+    pub fn isHighFragmentation(self: *const Self) bool {
+        return self.tenured.free_list.largestFreeBlock() <= self.highWaterMark();
+    }
+
+    pub fn isLowMemory(self: *const Self) bool {
+        return self.tenured.free_list.free_space <= self.highWaterMark();
+    }
+
+    pub fn resetAging(self: *Self) void {
+        self.aging.reset();
+        self.clearCards(self.aging.start, self.aging.end);
+        self.clearDecks(self.aging.start, self.aging.end);
+    }
+
+    pub fn grow(self: *const Self, requested_bytes: Cell) !*Self {
+        return self.growWithSizes(requested_bytes, self.young_size, self.aging_size);
+    }
+
+    pub fn growWithSizes(self: *const Self, requested_bytes: Cell, young_size: Cell, aging_size: Cell) !*Self {
+        const new_tenured_size = layouts.alignCell(2 * self.tenured_size + requested_bytes, layouts.data_alignment);
+
+        return DataHeap.init(
+            self.allocator,
+            young_size,
+            aging_size,
+            new_tenured_size,
+        );
+    }
+};
+
+test "data_heap basic allocation" {
+    const allocator = std.testing.allocator;
+
+    const heap = try DataHeap.init(
+        allocator,
+        4096,
+        4096,
+        8192,
+    );
+    defer heap.deinit();
+
+    const obj1 = heap.allocateNursery(64);
+    try std.testing.expect(obj1 != null);
+    try std.testing.expectEqual(Generation.nursery, heap.addressGeneration(obj1.?).?);
+
+    const obj2 = heap.allocateAging(64);
+    try std.testing.expect(obj2 != null);
+    try std.testing.expectEqual(Generation.aging, heap.addressGeneration(obj2.?).?);
+
+    const obj3 = heap.allocateTenured(64);
+    try std.testing.expect(obj3 != null);
+    try std.testing.expectEqual(Generation.tenured, heap.addressGeneration(obj3.?).?);
+}
+
+test "data_heap generations" {
+    const allocator = std.testing.allocator;
+
+    const heap = try DataHeap.init(allocator, 4096, 4096, 8192);
+    defer heap.deinit();
+
+    try std.testing.expect(heap.inYoungGeneration(heap.nursery.start));
+    try std.testing.expect(heap.inYoungGeneration(heap.aging.start));
+    try std.testing.expect(!heap.inYoungGeneration(heap.tenured.start));
+
+    try std.testing.expect(heap.contains(heap.nursery.start));
+    try std.testing.expect(heap.contains(heap.tenured.start));
+    try std.testing.expect(!heap.contains(0));
+}
+
+test "data_heap swap_aging" {
+    const allocator = std.testing.allocator;
+
+    const heap = try DataHeap.init(allocator, 4096, 4096, 8192);
+    defer heap.deinit();
+
+    const original_aging_start = heap.aging.start;
+    const original_semi_start = heap.aging_semispace.start;
+
+    _ = heap.allocateAging(64);
+    try std.testing.expect(heap.aging.usedBytes() > 0);
+
+    heap.swapAgingSpaces();
+
+    try std.testing.expectEqual(original_semi_start, heap.aging.start);
+    try std.testing.expectEqual(original_aging_start, heap.aging_semispace.start);
+
+    try std.testing.expectEqual(@as(Cell, 0), heap.aging_semispace.usedBytes());
+}

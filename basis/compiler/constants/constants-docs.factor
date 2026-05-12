@@ -24,10 +24,6 @@ HELP: rt-literal
 { $description "Relocation type for a literal. The literal can be either an immediate such as a fixnum or " { $link f } " or an object reference." }
 { $see-also rel-literal } ;
 
-HELP: string-offset
-{ $values { "n" integer } }
-{ $description "hm" } ;
-
 HELP: vm-context-offset
 { $values { "n" integer } }
 { $description "Offset in bytes from the start of the vm struct to the context (ctx) field." } ;
@@ -101,7 +97,8 @@ $nl
     rt-vm
     rt-cards-offset
     rt-decks-offset
-    rt-dlsym-toc
+    rt-trampoline
+    rt-trampoline2
     rt-inline-cache-miss
     rt-safepoint
 } ;

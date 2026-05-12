@@ -1,9 +1,10 @@
 ! Copyright (C) 2007, 2009 Slava Pestov.
 ! See https://factorcode.org/license.txt for BSD license.
-USING: accessors arrays assocs combinators.short-circuit fry
-io.directories io.files io.files.info io.pathnames kernel make
-memoize namespaces sequences sets sorting splitting vocabs
-vocabs.private vocabs.loader vocabs.metadata ;
+USING: accessors arrays assocs combinators
+combinators.short-circuit io.directories io.files io.files.info
+io.files.types io.pathnames kernel make namespaces sequences
+sets sorting splitting vocabs vocabs.loader vocabs.metadata
+vocabs.private ;
 IN: vocabs.hierarchy
 
 TUPLE: vocab-prefix name ;
@@ -16,12 +17,18 @@ M: vocab-prefix vocab-name name>> ;
 
 : visible-dir? ( entry -- ? )
     {
-        [ directory? ]
+        [
+            dup type>> {
+                { +directory+ [ drop t ] }
+                { +symbolic-link+ [ name>> file-info type>> +directory+ = ] }
+                [ 2drop f ]
+            } case
+        ]
         [ name>> "." head? not ]
         [ name>> valid-vocab-name? ]
     } 1&& ;
 
-: visible-dirs ( seq -- seq' )
+: visible-dirs ( entries -- entries )
     [ visible-dir? ] filter [ name>> ] sort-by ;
 
 ERROR: vocab-root-required root ;
@@ -55,12 +62,11 @@ DEFER: add-vocab%
     ] 2with each ;
 
 : add-vocab% ( vocab-path vocab-name entries -- )
-    3dup rot file-name ".factor" append '[ name>> _ =  ] any?
+    3dup rot file-name ".factor" append '[ name>> _ = ] any?
     [ >vocab-link ] [ <vocab-prefix> ] if , add-vocab-children% ;
 
 : (disk-vocabs-recursive) ( root prefix -- seq )
-    vocab-directory-entries
-    [ add-vocab-children% ] { } make ;
+    vocab-directory-entries [ add-vocab-children% ] { } make ;
 
 : no-rooted ( seq -- seq' ) [ find-vocab-root ] reject ;
 

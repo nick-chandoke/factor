@@ -466,44 +466,49 @@ SYMBOL: gl3-render-state
     ] each-index
     arr ;
 
+:: (gl3-fill-rect*-vertices) ( loc dim -- vertices )
+    loc first :> x1
+    loc second :> y1
+    x1 dim first + :> x2
+    y1 dim second + :> y2
+    ! Two triangles for a quad
+    {
+        { x1 y1 }
+        { x2 y1 }
+        { x2 y2 }
+        { x1 y1 }
+        { x2 y2 }
+        { x1 y2 }
+    } make-position-vertices ;
+
+:: (gl3-fill-rect-vertices) ( loc dim color -- vertices )
+    loc first :> x1
+    loc second :> y1
+    x1 dim first + :> x2
+    y1 dim second + :> y2
+    ! Two triangles for a quad
+    {
+        { x1 y1 }
+        { x2 y1 }
+        { x2 y2 }
+        { x1 y1 }
+        { x2 y2 }
+        { x1 y2 }
+    } color make-colored-vertices ;
+
+: (gl3-fill-rect) ( -- )
+    GL_TRIANGLES 0 6 glDrawArrays ;
+
 ! Version using uniform color (set by gl3-color)
 ! Note: coordinates are in logical pixels, projection handles scaling
-:: gl3-fill-rect* ( loc dim -- )
-    loc first :> x1
-    loc second :> y1
-    x1 dim first + :> x2
-    y1 dim second + :> y2
-    ! Two triangles for a quad
-    {
-        { x1 y1 }
-        { x2 y1 }
-        { x2 y2 }
-        { x1 y1 }
-        { x2 y2 }
-        { x1 y2 }
-    } make-position-vertices
-    upload-vertices
-    GL_TRIANGLES 0 6 glDrawArrays ;
+: gl3-fill-rect* ( loc dim -- )
+    (gl3-fill-rect*-vertices) upload-vertices (gl3-fill-rect) ;
 
 ! Version using per-vertex color
-:: gl3-fill-rect ( loc dim color -- )
-    loc first :> x1
-    loc second :> y1
-    x1 dim first + :> x2
-    y1 dim second + :> y2
-    ! Two triangles for a quad
-    {
-        { x1 y1 }
-        { x2 y1 }
-        { x2 y2 }
-        { x1 y1 }
-        { x2 y2 }
-        { x1 y2 }
-    } color make-colored-vertices
-    upload-vertices
-    GL_TRIANGLES 0 6 glDrawArrays ;
+: gl3-fill-rect ( loc dim color -- )
+    (gl3-fill-rect-vertices) upload-vertices (gl3-fill-rect) ;
 
-:: gl3-rect ( loc dim color -- )
+:: (gl3-rect-vertices) ( loc dim color -- vertices )
     loc first :> x1
     loc second :> y1
     x1 dim first + :> x2
@@ -515,26 +520,31 @@ SYMBOL: gl3-render-state
         { x2 y2 }
         { x1 y2 }
         { x1 y1 }
-    } color make-colored-vertices
-    upload-vertices
+    } color make-colored-vertices ;
+
+: (gl3-rect) ( -- )
     GL_LINE_STRIP 0 5 glDrawArrays ;
+
+: gl3-rect ( loc dim color -- )
+    (gl3-rect-vertices) upload-vertices (gl3-rect) ;
+
+:: (gl3-rect*-vertices) ( loc dim -- vertices )
+    loc first :> x1
+    loc second :> y1
+    x1 dim first + :> x2
+    y1 dim second + :> y2
+    ! Line loop as line strip with repeated first point
+    {
+        { x1 y1 }
+        { x2 y1 }
+        { x2 y2 }
+        { x1 y2 }
+        { x1 y1 }
+    } make-position-vertices ;
 
 ! Version using uniform color (set by gl3-color)
-:: gl3-rect* ( loc dim -- )
-    loc first :> x1
-    loc second :> y1
-    x1 dim first + :> x2
-    y1 dim second + :> y2
-    ! Line loop as line strip with repeated first point
-    {
-        { x1 y1 }
-        { x2 y1 }
-        { x2 y2 }
-        { x1 y2 }
-        { x1 y1 }
-    } make-position-vertices
-    upload-vertices
-    GL_LINE_STRIP 0 5 glDrawArrays ;
+: gl3-rect* ( loc dim -- )
+    (gl3-rect*-vertices) upload-vertices (gl3-rect) ;
 
 :: gl3-line ( p1 p2 color -- )
     p1 p2 2array color make-colored-vertices
@@ -817,7 +827,7 @@ SYMBOL: gl3-render-state
 
 :: draw-single-texture-gl3 ( texture -- )
     texture loc>>
-    texture dim>>
+    texture dim>> [ gl-unscale ] map
     texture texture>>
     texture image>> upside-down?>>
     gl3-draw-texture ;
@@ -828,3 +838,27 @@ M: single-texture draw-texture-gl3 draw-single-texture-gl3 ;
 
 M: multi-texture draw-texture-gl3
     grid>> [ [ draw-texture-gl3 ] each ] each ;
+
+: gl3-full-draw-init ( world -- )
+    ! Set up clip and viewport (GL3 version - no glOrtho)
+    dup gl3-init-clip
+    ! Set up GL state and projection in logical pixels
+    ! (viewport handles device pixel scaling)
+    [ dim>> ] [ background-color>> ] bi gl3-draw-init ;
+
+: setup-gl3-hooks ( -- )
+    [ gl3-init ] gl-init-hook set-global
+    [ gl3-full-draw-init ] gl-draw-init-hook set-global
+    [ gl3-color ] gl-color-hook set-global
+    [ gl3-fill-rect* ] gl-fill-rect-hook set-global
+    [ gl3-rect* ] gl-rect-hook set-global
+    [ gl3-line* ] gl-line-hook set-global
+    [ first2 gl3-translate ] gl-translate-hook set-global
+    [ with-gl3-translation ] with-translation-hook set-global
+    [ gl3-scale ] gl-scale-2d-hook set-global
+    [ gl3-rectf ] gl-rectf-hook set-global
+    [ with-gl3-matrix ] with-matrix-hook set-global
+    [ gl3-draw-lines* ] gl-draw-lines-hook set-global
+    [ make-texture-gl3 ] make-texture-hook set-global
+    [ draw-texture-gl3 ] draw-texture-hook set-global
+    t gl3-mode? set-global ;

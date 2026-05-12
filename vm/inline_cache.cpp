@@ -40,7 +40,9 @@ struct inline_cache_jit : public jit {
 };
 
 void inline_cache_jit::emit_check_and_jump(cell ic_type, cell i,
-                                           cell klass, cell method) {
+                                           cell klass, cell method_) {
+  data_root<word> method(method_, parent);
+
   // Class equal?
   cell check_type = PIC_CHECK_TAG;
   if (TAG(klass) != FIXNUM_TYPE)
@@ -55,7 +57,7 @@ void inline_cache_jit::emit_check_and_jump(cell ic_type, cell i,
   }
 
   // Yes? Jump to method
-  emit_with_literal(parent->special_objects[PIC_HIT], method);
+  emit_with_literal(parent->special_objects[PIC_HIT], method.value());
 }
 
 // index: 0 = top of stack, 1 = item underneath, etc
@@ -139,6 +141,7 @@ void factor_vm::update_pic_transitions(cell pic_size) {
 // code_root to take care of the details.
 // Allocates memory
 cell factor_vm::inline_cache_miss(cell return_address_) {
+  JIT_WRITABLE
   code_root return_address(return_address_, this);
   bool tail_call_site = tail_call_site_p(return_address.value);
 
@@ -192,6 +195,7 @@ cell factor_vm::inline_cache_miss(cell return_address_) {
 #endif
   }
 
+  JIT_EXECUTABLE
   return xt;
 }
 

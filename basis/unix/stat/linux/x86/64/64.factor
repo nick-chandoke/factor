@@ -1,4 +1,4 @@
-USING: kernel alien.c-types alien.syntax math classes.struct
+USING: alien.c-types alien.syntax classes.struct kernel
 unix.time unix.types ;
 IN: unix.stat
 

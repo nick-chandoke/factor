@@ -79,10 +79,10 @@ code_block* callback_heap::add(cell owner, cell return_rewind) {
   store_callback_operand(stub, 0, (cell)parent);
 #ifdef FACTOR_ARM64
   store_callback_operand(stub, 1, parent->code->safepoint_page);
-  store_callback_operand(stub, 2, (cell)&parent->dispatch_stats.megamorphic_cache_hits);
-  store_callback_operand(stub, 3, (cell)&factor::inline_cache_miss);
-  store_callback_operand(stub, 4, parent->cards_offset);
-  store_callback_operand(stub, 5, parent->decks_offset);
+  store_callback_operand(stub, 2, (cell)&factor::trampoline);
+  store_callback_operand(stub, 3, (cell)&factor::trampoline2);
+  store_callback_operand(stub, 4, (cell)&factor::inline_cache_miss);
+  store_callback_operand(stub, 5, (cell)&parent->dispatch_stats.megamorphic_cache_hits);
 #else
   store_callback_operand(stub, 2, (cell)parent);
 #endif

@@ -97,12 +97,12 @@ inline cell object::slot_count() const {
 // tag before being stored back to the original location.
 
 // Slots storing immediate values are left unchanged and the visitor does
-// inspect them.
+// not inspect them.
 
 // This is used by GC's copying, sweep and compact phases, and the
 // implementation of the become primitive.
 
-// Iteration is driven by visit_*() methods. Only one of them define GC
+// Iteration is driven by visit_*() methods. Only one of them defines GC
 // roots:
 //  - visit_all_roots()
 
@@ -206,7 +206,7 @@ template <typename Fixup> void slot_visitor<Fixup>::visit_all_roots() {
   }
 
   auto callback_slot_visitor = [&](code_block* stub, cell size) {
-	  (void)size;
+    (void)size;
     visit_handle(&stub->owner);
   };
   parent->callbacks->allocator->iterate(callback_slot_visitor, no_fixup());
@@ -246,7 +246,7 @@ template <typename Fixup> struct call_frame_slot_visitor {
   //              [size]
 
   void operator()(cell frame_top, cell size, code_block* owner, cell addr) {
-	  (void)size;
+    (void)size;
     cell return_address = owner->offset(addr);
 
     code_block* compiled =
@@ -263,7 +263,7 @@ template <typename Fixup> struct call_frame_slot_visitor {
     FACTOR_PRINT("call frame code block " << compiled << " with offset "
                  << return_address);
 #endif
-    cell* stack_pointer = (cell*)(frame_top + FRAME_RETURN_ADDRESS);
+    cell* stack_pointer = (cell*)frame_top;
     uint8_t* bitmap = info->gc_info_bitmap();
 
     // Subtract old value of base pointer from every derived pointer.
@@ -362,7 +362,7 @@ template <typename Fixup> struct call_frame_code_block_visitor {
 
   void operator()(cell frame_top, cell size, code_block* owner, cell addr) {
     (void)size;
-	  code_block* compiled =
+    code_block* compiled =
         Fixup::translated_code_block_map ? owner : fixup.fixup_code(owner);
     cell fixed_addr = compiled->address_for_offset(owner->offset(addr));
 

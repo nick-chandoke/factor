@@ -73,9 +73,14 @@ FUNCTION: int ffi_test_11 ( int a, FOO b, int c )
 
 { 14 } [ 1 2 3 make-FOO 4 ffi_test_11 ] unit-test
 
-FUNCTION: int ffi_test_13 ( int a, int b, int c, int d, int e, int f, int g, int h, int i, int j, int k )
+! arm64 macos packed stack parameters not implemented
+cpu arm.64? os macos? and [
 
-{ 66 } [ 1 2 3 4 5 6 7 8 9 10 11 ffi_test_13 ] unit-test
+    FUNCTION: int ffi_test_13 ( int a, int b, int c, int d, int e, int f, int g, int h, int i, int j, int k )
+
+    { 66 } [ 1 2 3 4 5 6 7 8 9 10 11 ffi_test_13 ] unit-test
+
+] unless
 
 FUNCTION: FOO ffi_test_14 ( int x, int y )
 
@@ -87,13 +92,18 @@ FUNCTION: c-string ffi_test_15 ( c-string x, c-string y )
 { "bar" } [ "xy" "xy" ffi_test_15 ] unit-test
 [ 1 2 ffi_test_15 ] must-fail
 
-STRUCT: BAR { x long } { y long } { z long } ;
+! Indirect result register not implemented
+cpu arm.64? [
 
-FUNCTION: BAR ffi_test_16 ( long x, long y, long z )
+    STRUCT: BAR { x long } { y long } { z long } ;
 
-{ 11 6 -7 } [
-    11 6 -7 ffi_test_16 [ x>> ] [ y>> ] [ z>> ] tri
-] unit-test
+    FUNCTION: BAR ffi_test_16 ( long x, long y, long z )
+
+    { 11 6 -7 } [
+        11 6 -7 ffi_test_16 [ x>> ] [ y>> ] [ z>> ] tri
+    ] unit-test
+
+] unless
 
 STRUCT: TINY { x int } ;
 
@@ -139,13 +149,18 @@ FUNCTION: TINY ffi_test_17 ( int x )
 
 { 25 } [ 2 3 4 5 ffi_test_18 ] unit-test
 
-: ffi_test_19 ( x y z -- BAR )
-    BAR "f-stdcall" "ffi_test_19" { long long long } f
-    alien-invoke gc ;
+! Indirect result register not implemented
+cpu arm.64? [
 
-{ 11 6 -7 } [
-    11 6 -7 ffi_test_19 [ x>> ] [ y>> ] [ z>> ] tri
-] unit-test
+    : ffi_test_19 ( x y z -- BAR )
+        BAR "f-stdcall" "ffi_test_19" { long long long } f
+        alien-invoke gc ;
+
+    { 11 6 -7 } [
+        11 6 -7 ffi_test_19 [ x>> ] [ y>> ] [ z>> ] tri
+    ] unit-test
+
+] unless
 
 : multi_ffi_test_18 ( w x y z w' x' y' z' -- int int )
     [ int "f-stdcall" "ffi_test_18" { int int int int } f alien-invoke ]
@@ -174,23 +189,28 @@ FUNCTION: void ffi_test_20 ( double x1, double x2, double x3,
 
 { } [ 1.0 2.0 3.0 4.0 5.0 6.0 7.0 8.0 9.0 ffi_test_20 ] unit-test
 
-! Make sure XT doesn't get clobbered in stack frame
+! arm64 macos packed stack parameters not implemented
+cpu arm.64? os macos? and [
 
-: ffi_test_31 ( a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a -- result y )
-    int
-    "f-cdecl" "ffi_test_31"
-    { int int int int int int int int int int int int int int int int int int int int int int int int int int int int int int int int int int int int int int int int int int } f
-    alien-invoke gc 3 ;
+    ! Make sure XT doesn't get clobbered in stack frame
 
-{ 861 3 } [ 42 [ ] each-integer ffi_test_31 ] unit-test
+    : ffi_test_31 ( a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a -- result y )
+        int
+        "f-cdecl" "ffi_test_31"
+        { int int int int int int int int int int int int int int int int int int int int int int int int int int int int int int int int int int int int int int int int int int } f
+        alien-invoke gc 3 ;
 
-: ffi_test_31_point_5 ( a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a -- result )
-    float
-    "f-cdecl" "ffi_test_31_point_5"
-    { float float float float float float float float float float float float float float float float float float float float float float float float float float float float float float float float float float float float float float float float float float } f
-    alien-invoke ;
+    { 861 3 } [ 42 [ ] each-integer ffi_test_31 ] unit-test
 
-{ 861.0 } [ 42 [ >float ] each-integer ffi_test_31_point_5 ] unit-test
+    : ffi_test_31_point_5 ( a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a -- result )
+        float
+        "f-cdecl" "ffi_test_31_point_5"
+        { float float float float float float float float float float float float float float float float float float float float float float float float float float float float float float float float float float float float float float float float float float } f
+        alien-invoke ;
+
+    { 861.0 } [ 42 [ >float ] each-integer ffi_test_31_point_5 ] unit-test
+
+] unless
 
 FUNCTION: longlong ffi_test_21 ( long x, long y )
 
@@ -928,24 +948,29 @@ FUNCTION: void* bug1021_test_1 ( void* s, int x )
     ] times
 ] unit-test
 
-! Varargs with non-float parameters works.
-FUNCTION-ALIAS: do-sum-ints2 int ffi_test_64 ( int n, int a, int b )
-FUNCTION-ALIAS: do-sum-ints3 int ffi_test_64 ( int n, int a, int b, int c )
+! Varargs are currently not supported on arm64 macos
+cpu arm.64? os macos? and [
 
-{ 30 60 } [
-    2 10 20 do-sum-ints2
-    3 10 20 30 do-sum-ints3
-] unit-test
+    ! Varargs with non-float parameters works.
+    FUNCTION-ALIAS: do-sum-ints2 int ffi_test_64 ( int n, int a, int b )
+    FUNCTION-ALIAS: do-sum-ints3 int ffi_test_64 ( int n, int a, int b, int c )
 
-! Varargs with non-floats doesn't work on windows
-FUNCTION-ALIAS: do-sum-doubles2 double ffi_test_65 ( int n, double a, double b )
-FUNCTION-ALIAS: do-sum-doubles3 double ffi_test_65 ( int n, double a, double b, double c )
-
-os windows? [
-    { 27.0 22.0 } [
-        2 7 20 do-sum-doubles2
-        3 5 10 7 do-sum-doubles3
+    { 30 60 } [
+        2 10 20 do-sum-ints2
+        3 10 20 30 do-sum-ints3
     ] unit-test
+
+    ! Varargs with non-floats doesn't work on windows
+    FUNCTION-ALIAS: do-sum-doubles2 double ffi_test_65 ( int n, double a, double b )
+    FUNCTION-ALIAS: do-sum-doubles3 double ffi_test_65 ( int n, double a, double b, double c )
+
+    os windows? [
+        { 27.0 22.0 } [
+            2 7 20 do-sum-doubles2
+            3 5 10 7 do-sum-doubles3
+        ] unit-test
+    ] unless
+
 ] unless
 
 FUNCTION: int bug1021_test_2 ( int a, char* b, void* c )

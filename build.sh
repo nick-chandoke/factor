@@ -112,6 +112,9 @@ download_with_downloader() {
 }
 
 set_downloader() {
+    if [ -n "$DOWNLOADER_NAME" ]; then
+        return
+    fi
     if test_program_installed wget; then
         DOWNLOADER_NAME=wget
         return
@@ -771,7 +774,7 @@ make_boot_image() {
 }
 
 install_deps_apt() {
-    sudo apt install --yes libpango1.0-dev libgtk3.0-dev wget git rlwrap libssl-dev
+    sudo apt install --yes libpango1.0-dev libgtk-3-dev wget git rlwrap libssl-dev
     check_ret sudo
 }
 

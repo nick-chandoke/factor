@@ -5,7 +5,7 @@ compiler.cfg.intrinsics.alien compiler.cfg.intrinsics.allot
 compiler.cfg.intrinsics.fixnum compiler.cfg.intrinsics.float
 compiler.cfg.intrinsics.misc compiler.cfg.intrinsics.slots
 compiler.cfg.intrinsics.strings compiler.cfg.stacks
-cpu.architecture kernel words ;
+cpu.architecture kernel system words ;
 QUALIFIED: alien
 QUALIFIED: alien.accessors
 QUALIFIED: alien.c-types

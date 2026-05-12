@@ -44,7 +44,6 @@ cell factor_vm::capture_callstack(context* ctx) {
   cell dst = stack->top();
   while (top < bottom) {
     *(cell*)dst = *(cell*)top - top;
-    FACTOR_ASSERT(*(cell*)top > top);
     top = *(cell*)top;
     dst += *(cell*)dst;
   }
